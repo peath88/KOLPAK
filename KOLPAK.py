@@ -216,15 +216,12 @@ def get_wall_posts_with_retry(api, owner_id, offset, retries=MAX_RETRIES):
         except ApiError as e:
             if e.code == 9:
                 wait_time = min(5, 1.5 ** (attempt + 1))
-                print(f"\n[FLOOD] Wait {wait_time:.1f}s")
                 time.sleep(wait_time)
                 continue
             elif e.code == 6:
-                print(f"\n[TOO MANY REQUESTS] Pause 2s")
                 time.sleep(2)
                 continue
             elif e.code == 1:
-                print(f"\n[UNKNOWN ERROR] Retry")
                 time.sleep(1)
                 continue
             else:
@@ -342,7 +339,7 @@ def get_post_comments(api, owner_id, post_id, group_owner_id):
         elif e.code == 15:
             pass
         else:
-            print(f"\n[COMMENTS ERROR] {e}")
+            pass
     
     return result
 
@@ -477,164 +474,171 @@ def main(show_logo=True):
     start_time = time.time()
     consecutive_errors = 0
     
-    while offset < total_posts:
-        try:
-            update_progress(offset, total_posts, len(all_docs), len(all_media), len(all_authors))
-            
-            posts_data = get_wall_posts_with_retry(vk, group_id, offset)
-            
-            if posts_data is None:
-                consecutive_errors += 1
-                if consecutive_errors >= 5:
+    try:
+        while offset < total_posts:
+            try:
+                update_progress(offset, total_posts, len(all_docs), len(all_media), len(all_authors))
+                
+                posts_data = get_wall_posts_with_retry(vk, group_id, offset)
+                
+                if posts_data is None:
+                    consecutive_errors += 1
+                    if consecutive_errors >= 5:
+                        save_progress(token, group_id, group_name, offset, total_posts, all_docs, all_media, all_authors)
+                        time.sleep(30)
+                        consecutive_errors = 0
+                    else:
+                        time.sleep(2)
+                    continue
+                
+                if not posts_data.get('items'):
+                    break
+                
+                for post in posts_data['items']:
+                    post_id = post.get('id')
+                    signer_id = post.get('signer_id')
+                    
+                    if not is_group_post(post, group_id):
+                        continue
+                    
+                    author_id = signer_id if signer_id and is_personal_page(signer_id) else None
+                    
+                    if 'attachments' in post:
+                        post_data = process_attachments(
+                            post['attachments'], 
+                            group_id,
+                            post_id,
+                            author_id,
+                            is_comment=False
+                        )
+                        
+                        all_docs.extend(post_data['docs'])
+                        all_media.extend(post_data['media'])
+                        all_authors.extend(post_data['authors'])
+                    
+                    if parse_comments:
+                        comments_data = get_post_comments(vk, group_id, post_id, group_id)
+                        all_docs.extend(comments_data['docs'])
+                        all_media.extend(comments_data['media'])
+                
+                offset += len(posts_data['items'])
+                consecutive_errors = 0
+                
+                if offset % 50 == 0:
                     save_progress(token, group_id, group_name, offset, total_posts, all_docs, all_media, all_authors)
-                    time.sleep(30)
+                
+                time.sleep(0.34)
+                
+            except KeyboardInterrupt:
+                print("\n\nInterrupted. Saving progress...")
+                save_progress(token, group_id, group_name, offset, total_posts, all_docs, all_media, all_authors)
+                print("Progress saved. Press Enter to exit...")
+                input()
+                return
+            except Exception as e:
+                consecutive_errors += 1
+                if consecutive_errors >= 3:
+                    save_progress(token, group_id, group_name, offset, total_posts, all_docs, all_media, all_authors)
+                    time.sleep(10)
                     consecutive_errors = 0
                 else:
                     time.sleep(2)
                 continue
-            
-            if not posts_data.get('items'):
-                break
-            
-            for post in posts_data['items']:
-                post_id = post.get('id')
-                signer_id = post.get('signer_id')
-                
-                if not is_group_post(post, group_id):
-                    continue
-                
-                author_id = signer_id if signer_id and is_personal_page(signer_id) else None
-                
-                if 'attachments' in post:
-                    post_data = process_attachments(
-                        post['attachments'], 
-                        group_id,
-                        post_id,
-                        author_id,
-                        is_comment=False
-                    )
-                    
-                    all_docs.extend(post_data['docs'])
-                    all_media.extend(post_data['media'])
-                    all_authors.extend(post_data['authors'])
-                
-                if parse_comments:
-                    comments_data = get_post_comments(vk, group_id, post_id, group_id)
-                    all_docs.extend(comments_data['docs'])
-                    all_media.extend(comments_data['media'])
-            
-            offset += len(posts_data['items'])
-            consecutive_errors = 0
-            
-            if offset % 50 == 0:
-                save_progress(token, group_id, group_name, offset, total_posts, all_docs, all_media, all_authors)
-            
-            time.sleep(0.34)
-            
-        except KeyboardInterrupt:
-            print("\n\nInterrupted. Saving progress...")
-            save_progress(token, group_id, group_name, offset, total_posts, all_docs, all_media, all_authors)
-            print("Progress saved. Press Enter to exit...")
-            input()
-            return
-        except Exception as e:
-            print(f"\n[ERROR] {e}")
-            consecutive_errors += 1
-            if consecutive_errors >= 3:
-                save_progress(token, group_id, group_name, offset, total_posts, all_docs, all_media, all_authors)
-                time.sleep(10)
-                consecutive_errors = 0
-            else:
-                time.sleep(2)
-            continue
-    
-    # Final progress bar at 100%
-    update_progress(total_posts, total_posts, len(all_docs), len(all_media), len(all_authors))
-    print("\n")
-    
-    # Get all unique user IDs
-    all_user_ids = set()
-    for doc in all_docs:
-        all_user_ids.add(doc['owner_id'])
-    for media in all_media:
-        all_user_ids.add(media['owner_id'])
-    for author in all_authors:
-        all_user_ids.add(author['owner_id'])
-    
-    user_names = get_user_info(vk, all_user_ids)
-    
-    # Group results by owner_id
-    doc_dict = defaultdict(list)
-    for item in all_docs:
-        doc_dict[item['owner_id']].append(item['post_url'])
-    
-    media_dict = defaultdict(list)
-    for item in all_media:
-        media_dict[item['owner_id']].append(item['post_url'])
-    
-    author_dict = defaultdict(list)
-    for item in all_authors:
-        author_dict[item['owner_id']].append(item['post_url'])
-    
-    elapsed = time.time() - start_time
-    hours = int(elapsed // 3600)
-    minutes = int((elapsed % 3600) // 60)
-    seconds = int(elapsed % 60)
-    
-    # Save results
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    safe_group_name = re.sub(r'[^\w\s-]', '', group_name).strip().replace(' ', '_')
-    output_file = f"results_{safe_group_name}_{timestamp}.txt"
-    
-    with open(output_file, 'w', encoding='utf-8') as f:
-        f.write(f"RESULTS FOR GROUP: {group_name}\n")
-        f.write(f"Group ID: {group_id}\n")
-        f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"Posts processed: {offset}\n")
-        f.write(f"Comments parsed: {'Yes' if parse_comments else 'No'}\n")
-        f.write(f"Time: {hours:02d}:{minutes:02d}:{seconds:02d}\n\n")
         
-        # 1. DOCUMENT OWNERS (all files including GIFs)
-        if doc_dict:
-            f.write(f"DOCUMENT OWNERS (files, GIFs, etc.): {len(doc_dict)}\n")
-            f.write("-" * 80 + "\n")
-            for owner_id in sorted(doc_dict.keys()):
-                name = user_names.get(owner_id, 'Unknown')
-                posts = sorted(set(doc_dict[owner_id]))
-                f.write(f"{name} | https://vk.com/id{owner_id}\n")
-                f.write(f"  Posts: {', '.join(posts)}\n\n")
-            f.write("\n")
+        # Final progress bar at 100%
+        update_progress(total_posts, total_posts, len(all_docs), len(all_media), len(all_authors))
+        print("\n")
         
-        # 2. MEDIA OWNERS (photos + videos)
-        if media_dict:
-            f.write(f"MEDIA OWNERS (photos, videos): {len(media_dict)}\n")
-            f.write("-" * 80 + "\n")
-            for owner_id in sorted(media_dict.keys()):
-                name = user_names.get(owner_id, 'Unknown')
-                posts = sorted(set(media_dict[owner_id]))
-                f.write(f"{name} | https://vk.com/id{owner_id}\n")
-                f.write(f"  Posts: {', '.join(posts)}\n\n")
-            f.write("\n")
+        # Get all unique user IDs
+        all_user_ids = set()
+        for doc in all_docs:
+            all_user_ids.add(doc['owner_id'])
+        for media in all_media:
+            all_user_ids.add(media['owner_id'])
+        for author in all_authors:
+            all_user_ids.add(author['owner_id'])
         
-        # 3. POST AUTHORS (users who signed posts)
-        if author_dict:
-            f.write(f"POST AUTHORS (users who signed posts): {len(author_dict)}\n")
-            f.write("-" * 80 + "\n")
-            for owner_id in sorted(author_dict.keys()):
-                name = user_names.get(owner_id, 'Unknown')
-                posts = sorted(set(author_dict[owner_id]))
-                f.write(f"{name} | https://vk.com/id{owner_id}\n")
-                f.write(f"  Posts: {', '.join(posts)}\n\n")
+        user_names = get_user_info(vk, all_user_ids)
+        
+        # Group results by owner_id
+        doc_dict = defaultdict(list)
+        for item in all_docs:
+            doc_dict[item['owner_id']].append(item['post_url'])
+        
+        media_dict = defaultdict(list)
+        for item in all_media:
+            media_dict[item['owner_id']].append(item['post_url'])
+        
+        author_dict = defaultdict(list)
+        for item in all_authors:
+            author_dict[item['owner_id']].append(item['post_url'])
+        
+        elapsed = time.time() - start_time
+        hours = int(elapsed // 3600)
+        minutes = int((elapsed % 3600) // 60)
+        seconds = int(elapsed % 60)
+        
+        # Save results
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        safe_group_name = re.sub(r'[^\w\s-]', '', group_name).strip().replace(' ', '_')
+        output_file = f"results_{safe_group_name}_{timestamp}.txt"
+        
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(f"RESULTS FOR GROUP: {group_name}\n")
+            f.write(f"Group ID: {group_id}\n")
+            f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Posts processed: {offset}\n")
+            f.write(f"Comments parsed: {'Yes' if parse_comments else 'No'}\n")
+            f.write(f"Time: {hours:02d}:{minutes:02d}:{seconds:02d}\n\n")
+            
+            # 1. DOCUMENT OWNERS (all files including GIFs)
+            if doc_dict:
+                f.write(f"DOCUMENT OWNERS (files, GIFs, etc.): {len(doc_dict)}\n")
+                f.write("-" * 80 + "\n")
+                for owner_id in sorted(doc_dict.keys()):
+                    name = user_names.get(owner_id, 'Unknown')
+                    posts = sorted(set(doc_dict[owner_id]))
+                    f.write(f"{name} | https://vk.com/id{owner_id}\n")
+                    f.write(f"  Posts: {', '.join(posts)}\n\n")
+                f.write("\n")
+            
+            # 2. MEDIA OWNERS (photos + videos)
+            if media_dict:
+                f.write(f"MEDIA OWNERS (photos, videos): {len(media_dict)}\n")
+                f.write("-" * 80 + "\n")
+                for owner_id in sorted(media_dict.keys()):
+                    name = user_names.get(owner_id, 'Unknown')
+                    posts = sorted(set(media_dict[owner_id]))
+                    f.write(f"{name} | https://vk.com/id{owner_id}\n")
+                    f.write(f"  Posts: {', '.join(posts)}\n\n")
+                f.write("\n")
+            
+            # 3. POST AUTHORS (users who signed posts)
+            if author_dict:
+                f.write(f"POST AUTHORS (users who signed posts): {len(author_dict)}\n")
+                f.write("-" * 80 + "\n")
+                for owner_id in sorted(author_dict.keys()):
+                    name = user_names.get(owner_id, 'Unknown')
+                    posts = sorted(set(author_dict[owner_id]))
+                    f.write(f"{name} | https://vk.com/id{owner_id}\n")
+                    f.write(f"  Posts: {', '.join(posts)}\n\n")
+        
+        # Keep progress file with token for next run
+        save_progress(token, group_id, group_name, offset, total_posts, all_docs, all_media, all_authors)
+        
+        print(f"Results saved to: {output_file}")
+        print("\nPress Enter to restart...")
+        input()
+        
+        # Restart without logo
+        main(show_logo=False)
     
-    # Keep progress file with token for next run
-    save_progress(token, group_id, group_name, offset, total_posts, all_docs, all_media, all_authors)
-    
-    print(f"Results saved to: {output_file}")
-    print("\nPress Enter to restart...")
-    input()
-    
-    # Restart without logo
-    main(show_logo=False)
+    except Exception as e:
+        print(f"\n[CRITICAL ERROR] {e}")
+        save_progress(token, group_id, group_name, offset, total_posts, all_docs, all_media, all_authors)
+        print("Progress saved. Press Enter to restart...")
+        input()
+        main(show_logo=False)
 
 if __name__ == '__main__':
     try:
@@ -645,4 +649,5 @@ if __name__ == '__main__':
         print(f"\nCritical error: {e}")
         import traceback
         traceback.print_exc()
-        input("Press Enter to exit...")
+        input("Press Enter to restart...")
+        main(show_logo=False)
