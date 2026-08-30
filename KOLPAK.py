@@ -15,10 +15,10 @@ MAX_RETRIES = 3
 TOKEN_EXPIRY_HOURS = 24
 
 LOGO = r"""
- _____ _____ __    _____ _____ _____     
+ _____ _____ __    _____ _____ _____    
 |  |  |     |  |  |  _  |  _  |  |  |  
-|    |  |  |  |__|   __|     |    |  |  
-|__|__|_____|_____|__|  |__|__|__|__|   
+|    -|  |  |  |__|   __|     |    -|  
+|__|__|_____|_____|__|  |__|__|__|__|  
 """
 
 def get_input(prompt):
@@ -56,9 +56,9 @@ def extract_token_from_url(url_or_token):
 def get_group_id(api, group_identifier):
     if 'vk.com/' in group_identifier or 'vk.ru/' in group_identifier:
         if 'vk.com/' in group_identifier:
-            group_identifier = group_identifier.split('vk.com/')[1].split('/')[0]
+            group_identifier = group_identifier.split('vk.com/')[-1].split('/')[0]
         else:
-            group_identifier = group_identifier.split('vk.ru/')[1].split('/')[0]
+            group_identifier = group_identifier.split('vk.ru/')[-1].split('/')[0]
         if group_identifier.startswith('@'):
             group_identifier = group_identifier[1:]
     
@@ -66,7 +66,7 @@ def get_group_id(api, group_identifier):
         try:
             group_info = api.groups.getById(group_id=group_identifier)
             if group_info:
-                return group_info[0]['id']
+                return -group_info[0]['id']
         except:
             pass
     
@@ -84,20 +84,20 @@ def get_group_id(api, group_identifier):
         resolved = api.utils.resolveScreenName(screen_name=group_identifier)
         if resolved:
             if resolved['type'] == 'group' or resolved['type'] == 'page':
-                return resolved['object_id']
+                return -resolved['object_id']
             elif resolved['type'] == 'user':
                 return resolved['object_id']
     except:
         pass
     
-    if group_identifier.startswith('') and group_identifier[1:].isdigit():
+    if group_identifier.startswith('-') and group_identifier[1:].isdigit():
         return int(group_identifier)
     
     return None
 
 def get_group_info(api, owner_id):
     try:
-        group_id = owner_id if owner_id < 0 else owner_id
+        group_id = -owner_id if owner_id < 0 else owner_id
         info = api.groups.getById(group_id=group_id, fields=['name', 'screen_name'])
         if info:
             return info[0]
@@ -134,7 +134,7 @@ def get_group_posts_count(api, owner_id):
 def load_progress():
     if os.path.exists(SAVE_FILE):
         try:
-            with open(SAVE_FILE, 'r', encoding='utf8') as f:
+            with open(SAVE_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except:
             return {
@@ -161,7 +161,7 @@ def load_progress():
     }
 
 def save_progress(token, group_id, group_name, offset, total_posts, docs, media, authors):
-    with open(SAVE_FILE, 'w', encoding='utf8') as f:
+    with open(SAVE_FILE, 'w', encoding='utf-8') as f:
         json.dump({
             'token': token,
             'token_timestamp': datetime.now().isoformat(),
@@ -179,7 +179,7 @@ def is_token_expired(token_timestamp):
         return True
     try:
         token_time = datetime.fromisoformat(token_timestamp)
-        if datetime.now()  token_time > timedelta(hours=TOKEN_EXPIRY_HOURS):
+        if datetime.now() - token_time > timedelta(hours=TOKEN_EXPIRY_HOURS):
             return True
     except:
         return True
@@ -191,7 +191,7 @@ def progress_bar(current, total, width=40):
     
     progress = min(current / total, 1.0)
     filled = int(width * progress)
-    bar = "[" + "█" * filled + " " * (width  filled) + "]"
+    bar = "[" + "█" * filled + " " * (width - filled) + "]"
     percent = int(progress * 100)
     return f"{bar} {percent:3d}%"
 
@@ -227,13 +227,13 @@ def get_wall_posts_with_retry(api, owner_id, offset, retries=MAX_RETRIES):
                 continue
             else:
                 print(f"\n[API ERROR {e.code}] {e}")
-                if attempt < retries  1:
+                if attempt < retries - 1:
                     time.sleep(3)
                     continue
                 return None
         except Exception as e:
             print(f"\n[NETWORK ERROR] {e}")
-            if attempt < retries  1:
+            if attempt < retries - 1:
                 time.sleep(3)
                 continue
             return None
@@ -574,20 +574,20 @@ def main(show_logo=True):
         for item in all_authors:
             author_dict[item['owner_id']].append(item['post_url'])
         
-        elapsed = time.time()  start_time
+        elapsed = time.time() - start_time
         hours = int(elapsed // 3600)
         minutes = int((elapsed % 3600) // 60)
         seconds = int(elapsed % 60)
         
         # Save results
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        safe_group_name = re.sub(r'[^\w\s]', '', group_name).strip().replace(' ', '_')
+        safe_group_name = re.sub(r'[^\w\s-]', '', group_name).strip().replace(' ', '_')
         output_file = f"results_{safe_group_name}_{timestamp}.txt"
         
-        with open(output_file, 'w', encoding='utf8') as f:
+        with open(output_file, 'w', encoding='utf-8') as f:
             f.write(f"RESULTS FOR GROUP: {group_name}\n")
             f.write(f"Group ID: {group_id}\n")
-            f.write(f"Date: {datetime.now().strftime('%Y%m%d %H:%M:%S')}\n")
+            f.write(f"Date: {datetime.now().strftime('%Y-%m%d %H:%M:%S')}\n")
             f.write(f"Posts processed: {offset}\n")
             f.write(f"Comments parsed: {'Yes' if parse_comments else 'No'}\n")
             f.write(f"Time: {hours:02d}:{minutes:02d}:{seconds:02d}\n\n")
@@ -595,7 +595,7 @@ def main(show_logo=True):
             # 1. DOCUMENT OWNERS (all files including GIFs)
             if doc_dict:
                 f.write(f"DOCUMENT OWNERS (files, GIFs, etc.): {len(doc_dict)}\n")
-                f.write("" * 75 + "\n")
+                f.write("-" * 75 + "\n")
                 for owner_id in sorted(doc_dict.keys()):
                     name = user_names.get(owner_id, 'Unknown')
                     posts = sorted(set(doc_dict[owner_id]))
@@ -606,7 +606,7 @@ def main(show_logo=True):
             # 2. MEDIA OWNERS (photos + videos)
             if media_dict:
                 f.write(f"MEDIA OWNERS (photos, videos): {len(media_dict)}\n")
-                f.write("" * 75 + "\n")
+                f.write("-" * 75 + "\n")
                 for owner_id in sorted(media_dict.keys()):
                     name = user_names.get(owner_id, 'Unknown')
                     posts = sorted(set(media_dict[owner_id]))
@@ -617,7 +617,7 @@ def main(show_logo=True):
             # 3. POST AUTHORS (users who signed posts)
             if author_dict:
                 f.write(f"POST AUTHORS (users who signed posts): {len(author_dict)}\n")
-                f.write("" * 75 + "\n")
+                f.write("-" * 75 + "\n")
                 for owner_id in sorted(author_dict.keys()):
                     name = user_names.get(owner_id, 'Unknown')
                     posts = sorted(set(author_dict[owner_id]))
