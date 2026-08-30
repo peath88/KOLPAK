@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from vk_api.exceptions import ApiError
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(_file_))
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SAVE_FILE = os.path.join(SCRIPT_DIR, 'progress.json')
 TIMEOUT = 30
 MAX_RETRIES = 3
