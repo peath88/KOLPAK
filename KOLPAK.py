@@ -270,7 +270,6 @@ def process_attachments(attachments, group_owner_id, post_id, post_author_id=Non
     for attachment in attachments:
         att_type = attachment.get('type')
         
-        # DOCS (all documents including GIFs)
         if att_type == 'doc':
             doc_owner = attachment['doc']['owner_id']
             if is_personal_page(doc_owner):
@@ -279,7 +278,6 @@ def process_attachments(attachments, group_owner_id, post_id, post_author_id=Non
                     'post_url': post_url
                 })
         
-        # PHOTO
         elif att_type == 'photo':
             sizes = attachment['photo'].get('sizes', [])
             if sizes:
@@ -291,7 +289,6 @@ def process_attachments(attachments, group_owner_id, post_id, post_author_id=Non
                         'type': 'photo'
                     })
         
-        # VIDEO
         elif att_type == 'video':
             video_owner = attachment['video'].get('owner_id')
             if video_owner and video_owner != group_owner_id and is_personal_page(video_owner):
@@ -309,18 +306,47 @@ def process_attachments(attachments, group_owner_id, post_id, post_author_id=Non
     
     return result
 
-def get_post_comments(api, owner_id, post_id, group_owner_id):
-    result = {'docs': [], 'media': []}
+def get_post_comments_batch(api, owner_id, post_ids, group_owner_id):
+    if not post_ids:
+        return {}
+    
+    code = "var result = {};"
+    
+    for i, post_id in enumerate(post_ids):
+        code += f"""
+        var comments{i} = API.wall.getComments({{
+            owner_id: {owner_id},
+            post_id: {post_id},
+            count: 100,
+            need_likes: 0
+        }});
+        result[{post_id}] = comments{i};
+        """
+    
+    code += "return result;"
     
     try:
-        comments = api.wall.getComments(
-            owner_id=owner_id,
-            post_id=post_id,
-            count=100,
-            need_likes=0
-        )
+        response = api.execute(code=code)
+        return response
+    except ApiError as e:
+        if e.code == 9:
+            time.sleep(1)
+            return get_post_comments_batch(api, owner_id, post_ids, group_owner_id)
+        else:
+            print(f"\n[EXECUTE ERROR] {e}")
+            return {}
+    except Exception as e:
+        print(f"\n[EXECUTE ERROR] {e}")
+        return {}
+
+def process_comments_batch(comments_data, group_owner_id):
+    result = {'docs': [], 'media': []}
+    
+    for post_id, comments in comments_data.items():
+        if not comments or 'items' not in comments:
+            continue
         
-        for comment in comments.get('items', []):
+        for comment in comments['items']:
             if not is_community_comment(comment, group_owner_id):
                 continue
             
@@ -333,14 +359,6 @@ def get_post_comments(api, owner_id, post_id, group_owner_id):
                 )
                 result['docs'].extend(comment_data['docs'])
                 result['media'].extend(comment_data['media'])
-                
-    except ApiError as e:
-        if e.code == 9:
-            time.sleep(1)
-        elif e.code == 15:
-            pass
-        else:
-            pass
     
     return result
 
@@ -356,7 +374,6 @@ def main(show_logo=True):
     saved_offset = progress.get('offset', 0)
     saved_total = progress.get('total_posts', 0)
     
-    # Check token
     token = None
     if saved_token and not is_token_expired(token_timestamp):
         token = saved_token
@@ -385,7 +402,6 @@ def main(show_logo=True):
                 print(f"Invalid token: {e}")
                 continue
     
-    # Check for saved progress
     group_id = None
     group_name = None
     offset = 0
@@ -412,7 +428,6 @@ def main(show_logo=True):
             all_authors = progress.get('authors', [])
             parse_comments = get_yes_no("Parse comments?")
     
-    # If no saved progress loaded, start fresh
     if not group_id:
         while True:
             group_input = get_input("\nGroup (name, ID or URL): ")
@@ -454,10 +469,8 @@ def main(show_logo=True):
         all_media = []
         all_authors = []
         
-        # Save initial progress with token
         save_progress(token, group_id, group_name, 0, total_posts, [], [], [])
     
-    # Setup VK API
     try:
         vk_session = vk_api.VkApi(token=token)
         vk = vk_session.get_api()
@@ -495,6 +508,8 @@ def main(show_logo=True):
                 if not posts_data.get('items'):
                     break
                 
+                post_ids_for_comments = []
+                
                 for post in posts_data['items']:
                     post_id = post.get('id')
                     signer_id = post.get('signer_id')
@@ -518,9 +533,19 @@ def main(show_logo=True):
                         all_authors.extend(post_data['authors'])
                     
                     if parse_comments:
-                        comments_data = get_post_comments(vk, group_id, post_id, group_id)
-                        all_docs.extend(comments_data['docs'])
-                        all_media.extend(comments_data['media'])
+                        post_ids_for_comments.append(post_id)
+                
+                if parse_comments and post_ids_for_comments:
+                    batch_size = 25
+                    for i in range(0, len(post_ids_for_comments), batch_size):
+                        batch = post_ids_for_comments[i:i+batch_size]
+                        comments_data = get_post_comments_batch(vk, group_id, batch, group_id)
+                        if comments_data:
+                            processed = process_comments_batch(comments_data, group_id)
+                            all_docs.extend(processed['docs'])
+                            all_media.extend(processed['media'])
+                        
+                        time.sleep(0.34)
                 
                 offset += len(posts_data['items'])
                 consecutive_errors = 0
@@ -546,11 +571,9 @@ def main(show_logo=True):
                     time.sleep(2)
                 continue
         
-        # Final progress bar at 100%
         update_progress(total_posts, total_posts, len(all_docs), len(all_media), len(all_authors))
         print("\n")
         
-        # Get all unique user IDs
         all_user_ids = set()
         for doc in all_docs:
             all_user_ids.add(doc['owner_id'])
@@ -561,7 +584,6 @@ def main(show_logo=True):
         
         user_names = get_user_info(vk, all_user_ids)
         
-        # Group results by owner_id
         doc_dict = defaultdict(list)
         for item in all_docs:
             doc_dict[item['owner_id']].append(item['post_url'])
@@ -579,7 +601,6 @@ def main(show_logo=True):
         minutes = int((elapsed % 3600) // 60)
         seconds = int(elapsed % 60)
         
-        # Save results
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         safe_group_name = re.sub(r'[^\w\s-]', '', group_name).strip().replace(' ', '_')
         output_file = f"results_{safe_group_name}_{timestamp}.txt"
@@ -587,12 +608,11 @@ def main(show_logo=True):
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(f"RESULTS FOR GROUP: {group_name}\n")
             f.write(f"Group ID: {group_id}\n")
-            f.write(f"Date: {datetime.now().strftime('%Y-%m%d %H:%M:%S')}\n")
+            f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"Posts processed: {offset}\n")
             f.write(f"Comments parsed: {'Yes' if parse_comments else 'No'}\n")
             f.write(f"Time: {hours:02d}:{minutes:02d}:{seconds:02d}\n\n")
             
-            # 1. DOCUMENT OWNERS (all files including GIFs)
             if doc_dict:
                 f.write(f"DOCUMENT OWNERS (files, GIFs, etc.): {len(doc_dict)}\n")
                 f.write("-" * 75 + "\n")
@@ -603,7 +623,6 @@ def main(show_logo=True):
                     f.write(f"  Posts: {', '.join(posts)}\n\n")
                 f.write("\n")
             
-            # 2. MEDIA OWNERS (photos + videos)
             if media_dict:
                 f.write(f"MEDIA OWNERS (photos, videos): {len(media_dict)}\n")
                 f.write("-" * 75 + "\n")
@@ -614,7 +633,6 @@ def main(show_logo=True):
                     f.write(f"  Posts: {', '.join(posts)}\n\n")
                 f.write("\n")
             
-            # 3. POST AUTHORS (users who signed posts)
             if author_dict:
                 f.write(f"POST AUTHORS (users who signed posts): {len(author_dict)}\n")
                 f.write("-" * 75 + "\n")
@@ -624,14 +642,12 @@ def main(show_logo=True):
                     f.write(f"{name} | https://vk.com/id{owner_id}\n")
                     f.write(f"  Posts: {', '.join(posts)}\n\n")
         
-        # Keep progress file with token for next run
         save_progress(token, group_id, group_name, offset, total_posts, all_docs, all_media, all_authors)
         
         print(f"Results saved to: {output_file}")
         print("\nPress Enter to restart...")
         input()
         
-        # Restart without logo
         main(show_logo=False)
     
     except Exception as e:
