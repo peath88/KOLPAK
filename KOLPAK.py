@@ -1,3 +1,4 @@
+```python
 import vk_api
 import time
 import json
@@ -186,6 +187,14 @@ def save_progress_to_file(index, token, group_id, group_name, offset, total_post
             'authors': authors
         }, f, ensure_ascii=False, indent=2)
     return index
+
+def delete_progress_file(index):
+    filename = f"progress_{index}.json"
+    filepath = os.path.join(SCRIPT_DIR, filename)
+    if os.path.exists(filepath):
+        os.remove(filepath)
+        return True
+    return False
 
 def get_next_progress_index():
     files = list_progress_files()
@@ -722,7 +731,8 @@ def main(show_logo=True):
                     f.write(f"{name} | https://vk.com/id{owner_id}\n")
                     f.write(f"  Posts: {', '.join(posts)}\n\n")
         
-        save_progress_to_file(progress_index, token, group_id, group_name, offset, total_posts, parse_comments, all_docs, all_media, all_authors)
+        delete_progress_file(progress_index)
+        print(f"\n[PROGRESS] Session #{progress_index} deleted")
         
         print(f"Results saved to: {output_file}")
         print("\nPress Enter to restart...")
@@ -748,3 +758,4 @@ if __name__ == '__main__':
         traceback.print_exc()
         input("Press Enter to restart...")
         main(show_logo=False)
+```
