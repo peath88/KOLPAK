@@ -308,9 +308,9 @@ def process_attachments(attachments, group_owner_id, post_id, post_author_id=Non
 
 def get_post_comments_batch(api, owner_id, post_ids, group_owner_id):
     if not post_ids:
-        return {}
+        return []
     
-    code = "var result = {};"
+    code = "var result = [];"
     
     for i, post_id in enumerate(post_ids):
         var_name = f"c{i}"
@@ -321,7 +321,7 @@ def get_post_comments_batch(api, owner_id, post_ids, group_owner_id):
             count: 100,
             need_likes: 0
         }});
-        result["{post_id}"] = {var_name};
+        result.push({{"post_id": {post_id}, "comments": {var_name}}});
         """
     
     code += "return result;"
@@ -335,15 +335,21 @@ def get_post_comments_batch(api, owner_id, post_ids, group_owner_id):
             return get_post_comments_batch(api, owner_id, post_ids, group_owner_id)
         else:
             print(f"\n[EXECUTE ERROR] {e}")
-            return {}
+            return []
     except Exception as e:
         print(f"\n[EXECUTE ERROR] {e}")
-        return {}
+        return []
 
 def process_comments_batch(comments_data, group_owner_id):
     result = {'docs': [], 'media': []}
     
-    for post_id, comments in comments_data.items():
+    if not comments_data:
+        return result
+    
+    for item in comments_data:
+        post_id = item.get('post_id')
+        comments = item.get('comments')
+        
         if not comments or 'items' not in comments:
             continue
         
@@ -355,7 +361,7 @@ def process_comments_batch(comments_data, group_owner_id):
                 comment_data = process_attachments(
                     comment['attachments'], 
                     group_owner_id,
-                    int(post_id),
+                    post_id,
                     is_comment=True
                 )
                 result['docs'].extend(comment_data['docs'])
