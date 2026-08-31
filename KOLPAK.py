@@ -9,7 +9,6 @@ from collections import defaultdict
 from vk_api.exceptions import ApiError
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-SAVE_FILE = os.path.join(SCRIPT_DIR, 'progress.json')
 TIMEOUT = 30
 MAX_RETRIES = 3
 TOKEN_EXPIRY_HOURS = 24
@@ -131,37 +130,49 @@ def get_group_posts_count(api, owner_id):
         print(f"Error getting posts count: {e}")
         return 0
 
-def load_progress():
-    if os.path.exists(SAVE_FILE):
+def load_token():
+    token_file = os.path.join(SCRIPT_DIR, 'token.json')
+    if os.path.exists(token_file):
         try:
-            with open(SAVE_FILE, 'r', encoding='utf-8') as f:
+            with open(token_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get('token'), data.get('token_timestamp')
+        except:
+            pass
+    return None, None
+
+def save_token(token):
+    token_file = os.path.join(SCRIPT_DIR, 'token.json')
+    with open(token_file, 'w', encoding='utf-8') as f:
+        json.dump({
+            'token': token,
+            'token_timestamp': datetime.now().isoformat()
+        }, f, ensure_ascii=False, indent=2)
+
+def list_progress_files():
+    files = []
+    for f in os.listdir(SCRIPT_DIR):
+        if f.startswith('progress_') and f.endswith('.json'):
+            files.append(f)
+    return sorted(files)
+
+def load_progress_by_index(index):
+    if index == 0:
+        return None
+    filename = f"progress_{index}.json"
+    filepath = os.path.join(SCRIPT_DIR, filename)
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except:
-            return {
-                'token': None,
-                'token_timestamp': None,
-                'group_id': None, 
-                'group_name': None,
-                'offset': 0, 
-                'total_posts': 0,
-                'docs': [], 
-                'media': [],
-                'authors': []
-            }
-    return {
-        'token': None,
-        'token_timestamp': None,
-        'group_id': None, 
-        'group_name': None,
-        'offset': 0, 
-        'total_posts': 0,
-        'docs': [], 
-        'media': [],
-        'authors': []
-    }
+            return None
+    return None
 
-def save_progress(token, group_id, group_name, offset, total_posts, docs, media, authors):
-    with open(SAVE_FILE, 'w', encoding='utf-8') as f:
+def save_progress_to_file(index, token, group_id, group_name, offset, total_posts, parse_comments, docs, media, authors):
+    filename = f"progress_{index}.json"
+    filepath = os.path.join(SCRIPT_DIR, filename)
+    with open(filepath, 'w', encoding='utf-8') as f:
         json.dump({
             'token': token,
             'token_timestamp': datetime.now().isoformat(),
@@ -169,10 +180,25 @@ def save_progress(token, group_id, group_name, offset, total_posts, docs, media,
             'group_name': group_name,
             'offset': offset,
             'total_posts': total_posts,
+            'parse_comments': parse_comments,
             'docs': docs,
             'media': media,
             'authors': authors
         }, f, ensure_ascii=False, indent=2)
+    return index
+
+def get_next_progress_index():
+    files = list_progress_files()
+    if not files:
+        return 1
+    indices = []
+    for f in files:
+        try:
+            idx = int(f.replace('progress_', '').replace('.json', ''))
+            indices.append(idx)
+        except:
+            continue
+    return max(indices) + 1 if indices else 1
 
 def is_token_expired(token_timestamp):
     if not token_timestamp:
@@ -369,13 +395,7 @@ def main(show_logo=True):
     if show_logo:
         print(LOGO)
     
-    progress = load_progress()
-    saved_token = progress.get('token')
-    token_timestamp = progress.get('token_timestamp')
-    saved_group_id = progress.get('group_id')
-    saved_group_name = progress.get('group_name')
-    saved_offset = progress.get('offset', 0)
-    saved_total = progress.get('total_posts', 0)
+    saved_token, token_timestamp = load_token()
     
     token = None
     if saved_token and not is_token_expired(token_timestamp):
@@ -400,38 +420,87 @@ def main(show_logo=True):
                 vk_session = vk_api.VkApi(token=token)
                 vk_test = vk_session.get_api()
                 vk_test.users.get()
+                save_token(token)
                 break
             except Exception as e:
                 print(f"Invalid token: {e}")
                 continue
     
-    group_id = None
-    group_name = None
-    offset = 0
-    total_posts = 0
-    all_docs = []
-    all_media = []
-    all_authors = []
-    parse_comments = False
+    progress_files = list_progress_files()
+    progress_index = None
+    progress_data = None
     
-    if saved_group_id and saved_offset > 0 and saved_offset < saved_total:
-        print(f"\n[SAVED PROGRESS] Found incomplete session")
-        print(f"  Group: {saved_group_name or saved_group_id}")
-        print(f"  Progress: {saved_offset}/{saved_total} posts")
-        print(f"  Found: {len(progress.get('docs', []))} docs, {len(progress.get('media', []))} media, {len(progress.get('authors', []))} authors")
-        
+    if progress_files:
+        print(f"\n[PROGRESS] Found {len(progress_files)} saved session(s)")
         load_saved = get_yes_no("Load saved progress?")
+        
         if load_saved:
-            group_id = saved_group_id
-            group_name = saved_group_name
-            offset = saved_offset
-            total_posts = saved_total
-            all_docs = progress.get('docs', [])
-            all_media = progress.get('media', [])
-            all_authors = progress.get('authors', [])
-            parse_comments = get_yes_no("Parse comments?")
+            if len(progress_files) == 1:
+                idx = int(progress_files[0].replace('progress_', '').replace('.json', ''))
+                progress_data = load_progress_by_index(idx)
+                if progress_data:
+                    progress_index = idx
+                    print(f"\n[LOADED] Session #{idx}")
+            else:
+                print("\nAvailable sessions:")
+                for i, f in enumerate(progress_files, 1):
+                    idx = int(f.replace('progress_', '').replace('.json', ''))
+                    data = load_progress_by_index(idx)
+                    if data:
+                        group_name = data.get('group_name', 'Unknown')
+                        offset = data.get('offset', 0)
+                        total = data.get('total_posts', 0)
+                        docs = len(data.get('docs', []))
+                        media = len(data.get('media', []))
+                        authors = len(data.get('authors', []))
+                        print(f"  {i}. [{idx}] {group_name} - {offset}/{total} posts, D:{docs} M:{media} A:{authors}")
+                
+                while True:
+                    try:
+                        choice = get_input(f"\nSelect session number (1-{len(progress_files)}) or 0 for new: ")
+                        choice = int(choice)
+                        if 0 <= choice <= len(progress_files):
+                            break
+                        print(f"Please enter 0-{len(progress_files)}")
+                    except ValueError:
+                        print("Please enter a number")
+                
+                if choice == 0:
+                    progress_data = None
+                    progress_index = None
+                else:
+                    idx = int(progress_files[choice-1].replace('progress_', '').replace('.json', ''))
+                    progress_data = load_progress_by_index(idx)
+                    if progress_data:
+                        progress_index = idx
+                        print(f"\n[LOADED] Session #{idx}")
     
-    if not group_id:
+    if progress_data:
+        group_id = progress_data.get('group_id')
+        group_name = progress_data.get('group_name')
+        offset = progress_data.get('offset', 0)
+        total_posts = progress_data.get('total_posts', 0)
+        all_docs = progress_data.get('docs', [])
+        all_media = progress_data.get('media', [])
+        all_authors = progress_data.get('authors', [])
+        parse_comments = progress_data.get('parse_comments', False)
+        
+        print(f"\n[RESUME] Group: {group_name}")
+        print(f"  Progress: {offset}/{total_posts} posts")
+        print(f"  Found: {len(all_docs)} docs, {len(all_media)} media, {len(all_authors)} authors")
+        print(f"  Comments: {'Yes' if parse_comments else 'No'}")
+    else:
+        if not progress_index:
+            progress_index = get_next_progress_index()
+        
+        group_id = None
+        group_name = None
+        offset = 0
+        total_posts = 0
+        all_docs = []
+        all_media = []
+        all_authors = []
+        
         while True:
             group_input = get_input("\nGroup (name, ID or URL): ")
             if not group_input:
@@ -478,7 +547,8 @@ def main(show_logo=True):
         all_media = []
         all_authors = []
         
-        save_progress(token, group_id, group_name, 0, total_posts, [], [], [])
+        save_progress_to_file(progress_index, token, group_id, group_name, 0, total_posts, parse_comments, [], [], [])
+        print(f"\n[NEW SESSION] #{progress_index} - {group_name}")
     
     try:
         vk_session = vk_api.VkApi(token=token)
@@ -507,7 +577,7 @@ def main(show_logo=True):
                 if posts_data is None:
                     consecutive_errors += 1
                     if consecutive_errors >= 5:
-                        save_progress(token, group_id, group_name, offset, total_posts, all_docs, all_media, all_authors)
+                        save_progress_to_file(progress_index, token, group_id, group_name, offset, total_posts, parse_comments, all_docs, all_media, all_authors)
                         time.sleep(30)
                         consecutive_errors = 0
                     else:
@@ -560,20 +630,20 @@ def main(show_logo=True):
                 consecutive_errors = 0
                 
                 if offset % 50 == 0:
-                    save_progress(token, group_id, group_name, offset, total_posts, all_docs, all_media, all_authors)
+                    save_progress_to_file(progress_index, token, group_id, group_name, offset, total_posts, parse_comments, all_docs, all_media, all_authors)
                 
                 time.sleep(0.34)
                 
             except KeyboardInterrupt:
                 print("\n\nInterrupted. Saving progress...")
-                save_progress(token, group_id, group_name, offset, total_posts, all_docs, all_media, all_authors)
+                save_progress_to_file(progress_index, token, group_id, group_name, offset, total_posts, parse_comments, all_docs, all_media, all_authors)
                 print("Progress saved. Press Enter to exit...")
                 input()
                 return
             except Exception as e:
                 consecutive_errors += 1
                 if consecutive_errors >= 3:
-                    save_progress(token, group_id, group_name, offset, total_posts, all_docs, all_media, all_authors)
+                    save_progress_to_file(progress_index, token, group_id, group_name, offset, total_posts, parse_comments, all_docs, all_media, all_authors)
                     time.sleep(10)
                     consecutive_errors = 0
                 else:
@@ -617,6 +687,7 @@ def main(show_logo=True):
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(f"RESULTS FOR GROUP: {group_name}\n")
             f.write(f"Group ID: {group_id}\n")
+            f.write(f"Session: #{progress_index}\n")
             f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"Posts processed: {offset}\n")
             f.write(f"Comments parsed: {'Yes' if parse_comments else 'No'}\n")
@@ -651,7 +722,7 @@ def main(show_logo=True):
                     f.write(f"{name} | https://vk.com/id{owner_id}\n")
                     f.write(f"  Posts: {', '.join(posts)}\n\n")
         
-        save_progress(token, group_id, group_name, offset, total_posts, all_docs, all_media, all_authors)
+        save_progress_to_file(progress_index, token, group_id, group_name, offset, total_posts, parse_comments, all_docs, all_media, all_authors)
         
         print(f"Results saved to: {output_file}")
         print("\nPress Enter to restart...")
@@ -661,7 +732,7 @@ def main(show_logo=True):
     
     except Exception as e:
         print(f"\n[CRITICAL ERROR] {e}")
-        save_progress(token, group_id, group_name, offset, total_posts, all_docs, all_media, all_authors)
+        save_progress_to_file(progress_index, token, group_id, group_name, offset, total_posts, parse_comments, all_docs, all_media, all_authors)
         print("Progress saved. Press Enter to restart...")
         input()
         main(show_logo=False)
