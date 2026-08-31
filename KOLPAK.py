@@ -1,4 +1,3 @@
-```python
 import vk_api
 import time
 import json
@@ -758,4 +757,3 @@ if __name__ == '__main__':
         traceback.print_exc()
         input("Press Enter to restart...")
         main(show_logo=False)
-```
