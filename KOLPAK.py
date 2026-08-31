@@ -624,7 +624,7 @@ def main(show_logo=True):
             
             if doc_dict:
                 f.write(f"DOCUMENT OWNERS (files, GIFs, etc.): {len(doc_dict)}\n")
-                f.write("-" * 75 + "\n")
+                f.write("-" * 65 + "\n")
                 for owner_id in sorted(doc_dict.keys()):
                     name = user_names.get(owner_id, 'Unknown')
                     posts = sorted(set(doc_dict[owner_id]))
@@ -634,7 +634,7 @@ def main(show_logo=True):
             
             if media_dict:
                 f.write(f"MEDIA OWNERS (photos, videos): {len(media_dict)}\n")
-                f.write("-" * 75 + "\n")
+                f.write("-" * 65 + "\n")
                 for owner_id in sorted(media_dict.keys()):
                     name = user_names.get(owner_id, 'Unknown')
                     posts = sorted(set(media_dict[owner_id]))
@@ -644,7 +644,7 @@ def main(show_logo=True):
             
             if author_dict:
                 f.write(f"POST AUTHORS (users who signed posts): {len(author_dict)}\n")
-                f.write("-" * 75 + "\n")
+                f.write("-" * 65 + "\n")
                 for owner_id in sorted(author_dict.keys()):
                     name = user_names.get(owner_id, 'Unknown')
                     posts = sorted(set(author_dict[owner_id]))
