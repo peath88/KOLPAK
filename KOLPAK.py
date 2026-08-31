@@ -226,13 +226,11 @@ def get_wall_posts_with_retry(api, owner_id, offset, retries=MAX_RETRIES):
                 time.sleep(1)
                 continue
             else:
-                print(f"\n[API ERROR {e.code}] {e}")
                 if attempt < retries - 1:
                     time.sleep(3)
                     continue
                 return None
         except Exception as e:
-            print(f"\n[NETWORK ERROR] {e}")
             if attempt < retries - 1:
                 time.sleep(3)
                 continue
@@ -334,10 +332,8 @@ def get_post_comments_batch(api, owner_id, post_ids, group_owner_id):
             time.sleep(1)
             return get_post_comments_batch(api, owner_id, post_ids, group_owner_id)
         else:
-            print(f"\n[EXECUTE ERROR] {e}")
             return []
     except Exception as e:
-        print(f"\n[EXECUTE ERROR] {e}")
         return []
 
 def process_comments_batch(comments_data, group_owner_id):
