@@ -313,14 +313,15 @@ def get_post_comments_batch(api, owner_id, post_ids, group_owner_id):
     code = "var result = {};"
     
     for i, post_id in enumerate(post_ids):
+        var_name = f"c{i}"
         code += f"""
-        var comments{i} = API.wall.getComments({{
+        var {var_name} = API.wall.getComments({{
             owner_id: {owner_id},
             post_id: {post_id},
             count: 100,
             need_likes: 0
         }});
-        result[{post_id}] = comments{i};
+        result[{post_id}] = {var_name};
         """
     
     code += "return result;"
