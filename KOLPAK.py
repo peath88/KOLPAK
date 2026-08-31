@@ -73,7 +73,7 @@ def get_group_id(api, group_identifier):
     try:
         group_info = api.groups.getById(group_id=group_identifier)
         if group_info:
-            return group_info[0]['id']
+            return -group_info[0]['id']
     except ApiError as e:
         if e.code == 100:
             pass
@@ -438,10 +438,16 @@ def main(show_logo=True):
             try:
                 vk_session = vk_api.VkApi(token=token)
                 vk = vk_session.get_api()
+                
                 group_id = get_group_id(vk, group_input)
                 if not group_id:
                     print(f"Group '{group_input}' not found, try again")
                     continue
+                
+                if group_id > 0:
+                    print(f"Warning: Got positive ID {group_id}, negating for group API")
+                    group_id = -group_id
+                
                 break
             except Exception as e:
                 print(f"Error: {e}")
