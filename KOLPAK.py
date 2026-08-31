@@ -321,7 +321,7 @@ def get_post_comments_batch(api, owner_id, post_ids, group_owner_id):
             count: 100,
             need_likes: 0
         }});
-        result[{post_id}] = {var_name};
+        result["{post_id}"] = {var_name};
         """
     
     code += "return result;"
@@ -355,7 +355,7 @@ def process_comments_batch(comments_data, group_owner_id):
                 comment_data = process_attachments(
                     comment['attachments'], 
                     group_owner_id,
-                    post_id,
+                    int(post_id),
                     is_comment=True
                 )
                 result['docs'].extend(comment_data['docs'])
